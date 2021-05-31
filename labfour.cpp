@@ -2,18 +2,23 @@
 #include <opencv2/opencv.hpp>
 #include "panoramic_utils.h"
 
+// class to hold SIFT features
 struct siftFeatures{
     std::vector<cv::KeyPoint> keypoints;
     cv::Mat descriptors;
 };
 
+// Function header for STEP-1 until STEP-5 consecutively
 std::vector<cv::Mat> projectImageIntoCylinder(cv::String folderName);
 std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjectedImages);
 std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& listOfProjectedImages,
                                              std::vector<siftFeatures>& listOfFeatures);
-cv::Mat estimateTranslation(std::vector<cv::Mat>& listOfProjectedImages,
+std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedImages,
                             std::vector<siftFeatures>& listOfFeatures,
                             std::vector<std::vector<cv::DMatch>>& listOfMatches);
+void buildPanoramicImage(std::vector<cv::Mat>& listOfProjectedImages,
+                         std::vector<cv::Mat>& listOfHomography);
+
 
 // Helper function to find the minimum distance between matches
 int findMinimumDistance(std::vector<cv::DMatch>& matches);
@@ -32,77 +37,14 @@ int main(int argc, char** argv)
     // STEP-3 Find matching features
     std::vector<std::vector<cv::DMatch>> listOfMatches;
     listOfMatches = findMatchingFeatures(listOfProjectedImages, listOfFeatures);
-    std::cout << "list of matches size: " << listOfMatches.size() << std::endl;
+//    std::cout << "list of matches size: " << listOfMatches.size() << std::endl;
 
     // STEP-4 Estimate translation between couples of adjacent images
-    //-- Localize the object
-    std::vector<cv::Point2f> obj;
-    std::vector<cv::Point2f> scene;
+    std::vector<cv::Mat> listOfHomography;
+    listOfHomography = estimateTranslation(listOfProjectedImages,listOfFeatures,listOfMatches);
 
-    std::vector<cv::DMatch> good_matches;
-    good_matches = listOfMatches[0];
-    siftFeatures features1 = listOfFeatures[0];
-    siftFeatures features2 = listOfFeatures[1];
-    std::vector<cv::KeyPoint> keypoints1 = features1.keypoints;
-    std::vector<cv::KeyPoint> keypoints2 = features2.keypoints;
-    cv::Mat img1 = listOfProjectedImages[0];
-    cv::Mat img2 = listOfProjectedImages[1];
-
-    cv::Mat img_matches;
-    cv::drawMatches(img1, keypoints1, img2, keypoints2, good_matches, img_matches, cv::Scalar::all(-1),
-                        cv::Scalar::all(-1), std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
-
-    for( size_t i = 0; i < good_matches.size(); i++ )
-    {
-        //-- Get the keypoints from the good matches
-        obj.push_back( keypoints1[ good_matches[i].queryIdx ].pt );
-        scene.push_back( keypoints2[ good_matches[i].trainIdx ].pt );
-    }
-
-    cv::Mat H = findHomography( obj, scene, cv::RANSAC );
-
-    //-- Get the corners from the image_1 ( the object to be "detected" )
-    std::vector<cv::Point2f> obj_corners(4);
-    obj_corners[0] = cv::Point2f(0, 0);
-    obj_corners[1] = cv::Point2f( (float)img1.cols, 0 );
-    obj_corners[2] = cv::Point2f( (float)img1.cols, (float)img1.rows );
-    obj_corners[3] = cv::Point2f( 0, (float)img1.rows );
-    std::vector<cv::Point2f> scene_corners(4);
-
-    cv::perspectiveTransform( obj_corners, scene_corners, H);
-
-    //-- Draw lines between the corners (the mapped object in the scene - image_2 )
-    line( img_matches, scene_corners[0] + cv::Point2f((float)img1.cols, 0),
-          scene_corners[1] + cv::Point2f((float)img1.cols, 0), cv::Scalar(0, 255, 0), 4 );
-    line( img_matches, scene_corners[1] + cv::Point2f((float)img1.cols, 0),
-          scene_corners[2] + cv::Point2f((float)img1.cols, 0), cv::Scalar( 0, 255, 0), 4 );
-    line( img_matches, scene_corners[2] + cv::Point2f((float)img1.cols, 0),
-          scene_corners[3] + cv::Point2f((float)img1.cols, 0), cv::Scalar( 0, 255, 0), 4 );
-    line( img_matches, scene_corners[3] + cv::Point2f((float)img1.cols, 0),
-          scene_corners[0] + cv::Point2f((float)img1.cols, 0), cv::Scalar( 0, 255, 0), 4 );
-
-    //-- Show detected matches
-    cv::imshow("Good Matches & Object detection", img_matches );
-    cv::waitKey();
-//
-//    // STEP-5 Build panoramic image
-//    H.at<double>(0,2) = - img1.cols - H.at<double>(0,2);
-//    cv::Mat img2_result;
-//    cv::warpPerspective(img2, img2_result, H, cv::Size(2 * img2.cols, img2.rows));
-//
-//    cv::Mat result(img1.rows, 2 * img1.cols, img1.type());
-//
-//    cv::Mat leftResult = result(cv::Rect(0, 0, img1.cols, img1.rows));
-//    cv::Mat rightResult = result(cv::Rect(img1.cols, 0, img2.cols, img2.rows));
-//
-//    cv::Mat image1 = img1(cv::Rect(0, 0, img1.cols, img1.rows));
-//    cv::Mat image2 = img2_result(cv::Rect(0, 0, img2.cols, img2.rows));
-//
-//    image1.copyTo(leftResult); //Img1 will be on the left of result
-//    image2.copyTo(rightResult); //Img2 will be on the right of result
-//
-//    imshow("Finalimg", result);
-//    cv::waitKey();
+    // STEP-5 Build panoramic image
+    buildPanoramicImage(listOfProjectedImages, listOfHomography);
 
 
     cv::destroyAllWindows();
@@ -227,15 +169,123 @@ std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& 
 
         listOfMatches.push_back(good_matches);
 
+//        cv::Mat img_matches;
+//        cv::drawMatches(img1, keypoints1, img2, keypoints2, good_matches, img_matches, cv::Scalar::all(-1),
+//                        cv::Scalar::all(-1), std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
+//
+//        cv::imshow("Matches", img_matches);
+//        cv::waitKey();
+    }
+
+    return listOfMatches;
+}
+
+
+std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedImages,
+                            std::vector<siftFeatures>& listOfFeatures,
+                            std::vector<std::vector<cv::DMatch>>& listOfMatches)
+{
+    std::vector<cv::Mat> listOfHomography;  // List of homography matrix
+
+    int numberOfImages = listOfProjectedImages.size();
+    for (int i = 0; i < numberOfImages - 1; ++i)
+    {
+        //-- Localize the object
+        std::vector<cv::Point2f> obj;
+        std::vector<cv::Point2f> scene;
+
+        std::vector<cv::DMatch> good_matches;
+        good_matches = listOfMatches[i];
+        siftFeatures features1 = listOfFeatures[i];
+        siftFeatures features2 = listOfFeatures[i + 1];
+        std::vector<cv::KeyPoint> keypoints1 = features1.keypoints;
+        std::vector<cv::KeyPoint> keypoints2 = features2.keypoints;
+        cv::Mat img1 = listOfProjectedImages[i];
+        cv::Mat img2 = listOfProjectedImages[i + 1];
+
         cv::Mat img_matches;
         cv::drawMatches(img1, keypoints1, img2, keypoints2, good_matches, img_matches, cv::Scalar::all(-1),
                         cv::Scalar::all(-1), std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 
-        cv::imshow("Matches", img_matches);
+        for( size_t j = 0; j < good_matches.size(); j++ )
+        {
+            //-- Get the keypoints from the good matches
+            obj.push_back( keypoints1[ good_matches[j].queryIdx ].pt );
+            scene.push_back( keypoints2[ good_matches[j].trainIdx ].pt );
+        }
+
+        cv::Mat H = findHomography( obj, scene, cv::RANSAC );
+        listOfHomography.push_back(H);
+
+        //-- Get the corners from the image_1 ( the object to be "detected" )
+        std::vector<cv::Point2f> obj_corners(4);
+        obj_corners[0] = cv::Point2f(0, 0);
+        obj_corners[1] = cv::Point2f( (float)img1.cols, 0 );
+        obj_corners[2] = cv::Point2f( (float)img1.cols, (float)img1.rows );
+        obj_corners[3] = cv::Point2f( 0, (float)img1.rows );
+        std::vector<cv::Point2f> scene_corners(4);
+
+        cv::perspectiveTransform( obj_corners, scene_corners, H);
+
+        //-- Draw lines between the corners (the mapped object in the scene - image_2 )
+        line( img_matches, scene_corners[0] + cv::Point2f((float)img1.cols, 0),
+              scene_corners[1] + cv::Point2f((float)img1.cols, 0), cv::Scalar(0, 255, 0), 4 );
+        line( img_matches, scene_corners[1] + cv::Point2f((float)img1.cols, 0),
+              scene_corners[2] + cv::Point2f((float)img1.cols, 0), cv::Scalar( 0, 255, 0), 4 );
+        line( img_matches, scene_corners[2] + cv::Point2f((float)img1.cols, 0),
+              scene_corners[3] + cv::Point2f((float)img1.cols, 0), cv::Scalar( 0, 255, 0), 4 );
+        line( img_matches, scene_corners[3] + cv::Point2f((float)img1.cols, 0),
+              scene_corners[0] + cv::Point2f((float)img1.cols, 0), cv::Scalar( 0, 255, 0), 4 );
+
+        //-- Show detected matches
+        cv::imshow("Good Matches & Object detection", img_matches );
         cv::waitKey();
     }
 
-    return listOfMatches;
+    return listOfHomography;
+}
+
+
+void buildPanoramicImage(std::vector<cv::Mat>& listOfProjectedImages,
+                         std::vector<cv::Mat>& listOfHomography)
+{
+    int numberOfImages = listOfProjectedImages.size();
+
+    // Prepare a large canvas to hold all the stitched images
+    cv::Mat image = listOfProjectedImages[0];
+    cv::Mat panoramicImage(image.rows, numberOfImages * image.cols, image.type());
+
+    cv::Mat img1 = listOfProjectedImages[0];
+
+    for (int i = 0; i < numberOfImages - 1; ++i)
+    {
+        cv::Mat H = listOfHomography[i];
+        cv::Mat img2 = listOfProjectedImages[i + 1];
+
+        H.at<double>(0,2) = - img1.cols - H.at<double>(0,2);
+        cv::Mat img2_result;
+        cv::warpPerspective(img2, img2_result, H, cv::Size(2 * img2.cols, img2.rows));
+
+        cv::Mat result(img1.rows, 2 * img1.cols, img1.type());
+
+        cv::Mat leftResult = result(cv::Rect(0, 0, img1.cols, img1.rows));
+        cv::Mat rightResult = result(cv::Rect(img1.cols, 0, img2.cols, img2.rows));
+
+        cv::Mat image1 = img1(cv::Rect(0, 0, img1.cols, img1.rows));
+        cv::Mat image2 = img2_result(cv::Rect(0, 0, img2.cols, img2.rows));
+
+        image1.copyTo(leftResult); //Img1 will be on the left of result
+        image2.copyTo(rightResult); //Img2 will be on the right of result
+
+        cv::Range rowRange = cv::Range::all();
+        int offset =  - H.at<double>(0,2);
+        std::cout << offset << std::endl;
+        cv::Range colRange = cv::Range(0, img1.cols + offset/2);
+        result = result.operator()(rowRange, colRange);
+        imshow("Final Image", result);
+        img1 = result;
+        cv::waitKey();
+    }
 }
 
 /**

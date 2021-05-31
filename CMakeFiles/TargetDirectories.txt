@@ -1,0 +1,3 @@
+/Users/wishnuputra/LABCV/LAB4/CMakeFiles/rebuild_cache.dir
+/Users/wishnuputra/LABCV/LAB4/CMakeFiles/edit_cache.dir
+/Users/wishnuputra/LABCV/LAB4/CMakeFiles/labfour.dir

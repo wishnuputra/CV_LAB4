@@ -2,14 +2,21 @@
 #include <opencv2/opencv.hpp>
 #include "panoramic_utils.h"
 
-// class to hold SIFT features
+// a struct to hold SIFT features
 struct siftFeatures{
     std::vector<cv::KeyPoint> keypoints;
     cv::Mat descriptors;
 };
 
+// Image folder name and file extension
+const cv::String IMAGE_FOLDER = "venezia";
+const cv::String IMAGE_EXTENSION = "png";
+
+// Ratio for refining the matches
+const float RATIO_THRESHOLD = 3.0f;
+
 // Function header for STEP-1 until STEP-5 consecutively
-std::vector<cv::Mat> projectImageIntoCylinder(cv::String folderName);
+std::vector<cv::Mat> projectImageIntoCylinder(cv::String imageFolder);
 std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjectedImages);
 std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& listOfProjectedImages,
                                              std::vector<siftFeatures>& listOfFeatures);
@@ -27,8 +34,7 @@ int main(int argc, char** argv)
 {
     // STEP-1 Project images into cylinder
     std::vector<cv::Mat> listOfProjectedImages;
-    cv::String folderName = "kitchen";
-    listOfProjectedImages = projectImageIntoCylinder(folderName);
+    listOfProjectedImages = projectImageIntoCylinder(IMAGE_FOLDER);
 
     // STEP-2 Extract feature using SIFT
     std::vector<siftFeatures> listOfFeatures;
@@ -37,7 +43,6 @@ int main(int argc, char** argv)
     // STEP-3 Find matching features
     std::vector<std::vector<cv::DMatch>> listOfMatches;
     listOfMatches = findMatchingFeatures(listOfProjectedImages, listOfFeatures);
-//    std::cout << "list of matches size: " << listOfMatches.size() << std::endl;
 
     // STEP-4 Estimate translation between couples of adjacent images
     std::vector<cv::Mat> listOfHomography;
@@ -45,7 +50,6 @@ int main(int argc, char** argv)
 
     // STEP-5 Build panoramic image
     buildPanoramicImage(listOfProjectedImages, listOfHomography);
-
 
     cv::destroyAllWindows();
     return 0;
@@ -60,17 +64,13 @@ int main(int argc, char** argv)
 int findMinimumDistance(std::vector<cv::DMatch>& matches)
 {
     int min_distance = matches[0].distance;
-    int index = 0;
     for (int i = 0; i < matches.size(); ++i)
     {
-//        std::cout << "distance " << i << ": " << matches[i].distance << std::endl;
         if (matches[i].distance < min_distance)
         {
             min_distance = matches[i].distance;
-            index = i;
         }
     }
-//    std::cout << "min distance at index " << index << ": " << min_distance << std::endl;
     return min_distance;
 }
 
@@ -78,25 +78,20 @@ int findMinimumDistance(std::vector<cv::DMatch>& matches)
  * This function will read all images in the selected folder and then
  * projected them using cylindrical projection. Then this function will
  * return an array of the projected images.
- * @param folderName
- * @return
  */
-std::vector<cv::Mat> projectImageIntoCylinder(cv::String folderName)
+std::vector<cv::Mat> projectImageIntoCylinder(cv::String imageFolder)
 {
     // Read file names in the image folder
     std::vector<cv::String> imageFileNames;
-    cv::String directory = folderName + "/i*.bmp";
+    cv::String directory = imageFolder + "/i*." + IMAGE_EXTENSION;
     cv::glob(directory, imageFileNames);
 
-//    std::cout << imageFileNames[0] << std::endl;
-
+    // Project all images in the folder
     cv::Mat originalImage;
     cv::Mat projectedImage;
     std::vector<cv::Mat> listOfProjectedImages(imageFileNames.size());
     for (int i = 0; i < imageFileNames.size(); ++i) {
         originalImage = cv::imread(imageFileNames[i]);
-//        cv::imshow("img1",originalImage);
-//        cv::waitKey();
         projectedImage = PanoramicUtils::cylindricalProj(originalImage, 30);
         listOfProjectedImages[i] = projectedImage;
     }
@@ -104,6 +99,11 @@ std::vector<cv::Mat> projectImageIntoCylinder(cv::String folderName)
     return listOfProjectedImages;
 };
 
+/**
+ *
+ * @param listOfProjectedImages
+ * @return
+ */
 std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjectedImages)
 {
     std::vector<siftFeatures> listOfFeatures;
@@ -127,6 +127,12 @@ std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjec
     return listOfFeatures;
 }
 
+/**
+ *
+ * @param listOfProjectedImages
+ * @param listOfFeatures
+ * @return
+ */
 std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& listOfProjectedImages,
                                              std::vector<siftFeatures>& listOfFeatures)
 {
@@ -152,35 +158,27 @@ std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& 
 
         //-- Refine matches by selecting matches with distance less than ratio * min_distance
         int min_distance = findMinimumDistance(matches);
-        const float ratio_thresh = 3.0f;
-
-//        std::cout << "matches size: " << matches.size() << std::endl;
-
         for (int j = 0; j < matches.size(); j++)
         {
-            if (matches[j].distance < ratio_thresh * min_distance)
+            if (matches[j].distance < RATIO_THRESHOLD * min_distance)
             {
                 good_matches.push_back(matches[j]);
-//                std::cout << "good matches at " << j << ": " << good_matches.size() << std::endl;
             }
         }
 
-//        std::cout << "good matches size: " << good_matches.size() << std::endl;
-
         listOfMatches.push_back(good_matches);
-
-//        cv::Mat img_matches;
-//        cv::drawMatches(img1, keypoints1, img2, keypoints2, good_matches, img_matches, cv::Scalar::all(-1),
-//                        cv::Scalar::all(-1), std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
-//
-//        cv::imshow("Matches", img_matches);
-//        cv::waitKey();
     }
 
     return listOfMatches;
 }
 
-
+/**
+ *
+ * @param listOfProjectedImages
+ * @param listOfFeatures
+ * @param listOfMatches
+ * @return
+ */
 std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedImages,
                             std::vector<siftFeatures>& listOfFeatures,
                             std::vector<std::vector<cv::DMatch>>& listOfMatches)
@@ -245,47 +243,64 @@ std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedIm
     return listOfHomography;
 }
 
-
+/**
+ *
+ * @param listOfProjectedImages
+ * @param listOfHomography
+ */
 void buildPanoramicImage(std::vector<cv::Mat>& listOfProjectedImages,
                          std::vector<cv::Mat>& listOfHomography)
 {
     int numberOfImages = listOfProjectedImages.size();
 
-    // Prepare a large canvas to hold all the stitched images
-    cv::Mat image = listOfProjectedImages[0];
-    cv::Mat panoramicImage(image.rows, numberOfImages * image.cols, image.type());
-
+    cv::Mat H = listOfHomography[0];
     cv::Mat img1 = listOfProjectedImages[0];
+    cv::Mat img_stitch;
 
     for (int i = 0; i < numberOfImages - 1; ++i)
     {
-        cv::Mat H = listOfHomography[i];
+        H = listOfHomography[i];
         cv::Mat img2 = listOfProjectedImages[i + 1];
 
-        H.at<double>(0,2) = - img1.cols - H.at<double>(0,2);
+        int x_translation = -H.at<double>(0,2);
+
+        // Use components of H matrix which are related to x and y translation
+        H.at<double>(0,0) = 1;
+        H.at<double>(0,1) = 0;
+        H.at<double>(0,2) = - img2.cols - H.at<double>(0,2);
+        H.at<double>(1,0) = 0;
+//        H.at<double>(1,1) = 1;
+//        H.at<double>(1,2) = 0;
+        H.at<double>(2,0) = 0;
+//        H.at<double>(2,1) = 0;
+//        H.at<double>(2,2) = 1;
+
         cv::Mat img2_result;
         cv::warpPerspective(img2, img2_result, H, cv::Size(2 * img2.cols, img2.rows));
 
-        cv::Mat result(img1.rows, 2 * img1.cols, img1.type());
-
-        cv::Mat leftResult = result(cv::Rect(0, 0, img1.cols, img1.rows));
-        cv::Mat rightResult = result(cv::Rect(img1.cols, 0, img2.cols, img2.rows));
-
-        cv::Mat image1 = img1(cv::Rect(0, 0, img1.cols, img1.rows));
-        cv::Mat image2 = img2_result(cv::Rect(0, 0, img2.cols, img2.rows));
-
-        image1.copyTo(leftResult); //Img1 will be on the left of result
-        image2.copyTo(rightResult); //Img2 will be on the right of result
-
         cv::Range rowRange = cv::Range::all();
-        int offset =  - H.at<double>(0,2);
-        std::cout << offset << std::endl;
-        cv::Range colRange = cv::Range(0, img1.cols + offset/2);
-        result = result.operator()(rowRange, colRange);
-        imshow("Final Image", result);
-        img1 = result;
+        cv::Range colRange = cv::Range(0, x_translation);
+        img2_result = img2_result.operator()(rowRange, colRange);
+
+        cv::hconcat(img1, img2_result, img_stitch);
+        img1 = img_stitch;
+        imshow("img_stitch", img_stitch);
         cv::waitKey();
     }
+
+    // Crop the image to hide the y shift
+    int y_translation = std::abs(H.at<double>(1,2));
+    cv::Range rowRange = cv::Range(y_translation,img_stitch.rows - y_translation);
+    cv::Range colRange = cv::Range::all();
+    img_stitch = img_stitch.operator()(rowRange, colRange);
+
+    // Equalize the histogram of the stitched image
+    cv::Mat final_image;
+    cv::equalizeHist(img_stitch,final_image);
+    imshow("Final Image", final_image);
+    imwrite("final_image.png",final_image);
+
+    cv::waitKey();
 }
 
 /**

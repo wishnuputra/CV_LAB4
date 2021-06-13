@@ -1,34 +1,43 @@
+/**
+ * Computer Vision - Final Project
+ * Name         : Wishnuputra Dhanu
+ * Student ID   : 2013067
+ */
+
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include "panoramic_utils.h"
 
 // a struct to hold SIFT features
-struct siftFeatures{
+struct Features{
     std::vector<cv::KeyPoint> keypoints;
     cv::Mat descriptors;
 };
 
-// Image folder name and file extension
-const cv::String IMAGE_FOLDER = "venezia";
-const cv::String IMAGE_EXTENSION = "png";
+// Image folder name, file extension, and features type
+const cv::String IMAGE_FOLDER = "kitchen"; // "venezia", "kitchen"
+const cv::String IMAGE_EXTENSION = "bmp"; // "png", "bmp"
+const cv::String FEATURES_TYPE = "SIFT"; // "SIFT", "ORB"
 
 // Ratio for refining the matches
+// when using SIFT, RATIO_THRESHOLD = 3.0f
+// when using ORB, RATIO_THRESHOLD = 6.0f
 const float RATIO_THRESHOLD = 3.0f;
 
 // Function header for STEP-1 until STEP-5 consecutively
 std::vector<cv::Mat> projectImageIntoCylinder(cv::String imageFolder);
-std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjectedImages);
+std::vector<Features> extractFeatures(std::vector<cv::Mat>& listOfProjectedImages, cv::String featuresType);
 std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& listOfProjectedImages,
-                                             std::vector<siftFeatures>& listOfFeatures);
+                                             std::vector<Features>& listOfFeatures);
 std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedImages,
-                            std::vector<siftFeatures>& listOfFeatures,
+                            std::vector<Features>& listOfFeatures,
                             std::vector<std::vector<cv::DMatch>>& listOfMatches);
 void buildPanoramicImage(std::vector<cv::Mat>& listOfProjectedImages,
                          std::vector<cv::Mat>& listOfHomography);
 
-
 // Helper function to find the minimum distance between matches
 int findMinimumDistance(std::vector<cv::DMatch>& matches);
+
 
 int main(int argc, char** argv)
 {
@@ -36,9 +45,9 @@ int main(int argc, char** argv)
     std::vector<cv::Mat> listOfProjectedImages;
     listOfProjectedImages = projectImageIntoCylinder(IMAGE_FOLDER);
 
-    // STEP-2 Extract feature using SIFT
-    std::vector<siftFeatures> listOfFeatures;
-    listOfFeatures = extractSiftFeatures(listOfProjectedImages);
+    // STEP-2 Extract feature using SIFT or ORB
+    std::vector<Features> listOfFeatures;
+    listOfFeatures = extractFeatures(listOfProjectedImages, FEATURES_TYPE);
 
     // STEP-3 Find matching features
     std::vector<std::vector<cv::DMatch>> listOfMatches;
@@ -97,27 +106,39 @@ std::vector<cv::Mat> projectImageIntoCylinder(cv::String imageFolder)
     }
 
     return listOfProjectedImages;
-};
+}
 
 /**
- *
+ * This function will extract the features on each images using the specified featuresType.
+ * Then it will save all the features inside a vector and return it.
  * @param listOfProjectedImages
  * @return
  */
-std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjectedImages)
+std::vector<Features> extractFeatures(std::vector<cv::Mat>& listOfProjectedImages, cv::String featuresType)
 {
-    std::vector<siftFeatures> listOfFeatures;
+    std::vector<Features> listOfFeatures;
     int numberOfImages = listOfProjectedImages.size();
-    cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
+    cv::Ptr<cv::SIFT> sift;
+    cv::Ptr<cv::ORB> orb;
+
+    if (featuresType == "SIFT") {
+        sift = cv::SIFT::create();
+    } else if (featuresType == "ORB") {
+        orb = cv::ORB::create();
+    }
 
     for (int i = 0; i < numberOfImages; ++i) {
         std::vector<cv::KeyPoint> keypoints;
         cv::Mat descriptors;
 
         cv::Mat img = listOfProjectedImages[i];
-        sift->detectAndCompute(img, cv::noArray(), keypoints, descriptors);
+        if (featuresType == "SIFT") {
+            sift->detectAndCompute(img, cv::noArray(), keypoints, descriptors);
+        } else if (featuresType == "ORB") {
+            orb->detectAndCompute(img,cv::noArray(), keypoints,descriptors);
+        }
 
-        siftFeatures features;
+        Features features;
         features.keypoints = keypoints;
         features.descriptors = descriptors;
 
@@ -128,25 +149,35 @@ std::vector<siftFeatures> extractSiftFeatures(std::vector<cv::Mat>& listOfProjec
 }
 
 /**
- *
+ * This function will find matching features between a pair of images using the struct Features.
+ * Then it will refine the matching features based on the ratio threshold. This means only
+ * the matching features with distance less than ratio * min_distance that will be saved.
+ * It will then save all the refined matching features in a vector and return it at the end.
  * @param listOfProjectedImages
  * @param listOfFeatures
  * @return
  */
 std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& listOfProjectedImages,
-                                             std::vector<siftFeatures>& listOfFeatures)
+                                             std::vector<Features>& listOfFeatures)
 {
     std::vector<std::vector<cv::DMatch>> listOfMatches;
 
     std::vector<cv::DMatch> matches;
-    cv::Ptr<cv::BFMatcher> matcher = cv::BFMatcher::create(cv::NORM_L2, false);
+    cv::Ptr<cv::BFMatcher> matcher;
+
+    if (FEATURES_TYPE == "SIFT") {
+        matcher = cv::BFMatcher::create(cv::NORM_L2, false);
+    } else if (FEATURES_TYPE == "ORB") {
+        matcher = cv::BFMatcher::create(cv::NORM_HAMMING, false);
+    }
+
     int numberOfImages = listOfProjectedImages.size();
 
     for (int i = 0; i < numberOfImages - 1; ++i)
     {
         std::vector<cv::DMatch> good_matches;
-        siftFeatures features1 = listOfFeatures[i];
-        siftFeatures features2 = listOfFeatures[i + 1];
+        Features features1 = listOfFeatures[i];
+        Features features2 = listOfFeatures[i + 1];
         cv::Mat descriptors1 = features1.descriptors;
         cv::Mat descriptors2 = features2.descriptors;
         std::vector<cv::KeyPoint> keypoints1 = features1.keypoints;
@@ -173,14 +204,15 @@ std::vector<std::vector<cv::DMatch>> findMatchingFeatures(std::vector<cv::Mat>& 
 }
 
 /**
- *
+ * This function will estimate the translation matrix H using the findHomography method.
+ * Then it will save all the translation matrices in a vector and return it.
  * @param listOfProjectedImages
  * @param listOfFeatures
  * @param listOfMatches
  * @return
  */
 std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedImages,
-                            std::vector<siftFeatures>& listOfFeatures,
+                            std::vector<Features>& listOfFeatures,
                             std::vector<std::vector<cv::DMatch>>& listOfMatches)
 {
     std::vector<cv::Mat> listOfHomography;  // List of homography matrix
@@ -194,8 +226,8 @@ std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedIm
 
         std::vector<cv::DMatch> good_matches;
         good_matches = listOfMatches[i];
-        siftFeatures features1 = listOfFeatures[i];
-        siftFeatures features2 = listOfFeatures[i + 1];
+        Features features1 = listOfFeatures[i];
+        Features features2 = listOfFeatures[i + 1];
         std::vector<cv::KeyPoint> keypoints1 = features1.keypoints;
         std::vector<cv::KeyPoint> keypoints2 = features2.keypoints;
         cv::Mat img1 = listOfProjectedImages[i];
@@ -244,7 +276,8 @@ std::vector<cv::Mat> estimateTranslation(std::vector<cv::Mat>& listOfProjectedIm
 }
 
 /**
- *
+ * This function will stitch all the images using the translation matrix H and warpPerspective method.
+ * After the panoramic image is constructed, it will equalize the histogram to enhance the contrast.
  * @param listOfProjectedImages
  * @param listOfHomography
  */
@@ -264,16 +297,28 @@ void buildPanoramicImage(std::vector<cv::Mat>& listOfProjectedImages,
 
         int x_translation = -H.at<double>(0,2);
 
-        // Use components of H matrix which are related to x and y translation
-        H.at<double>(0,0) = 1;
-        H.at<double>(0,1) = 0;
-        H.at<double>(0,2) = - img2.cols - H.at<double>(0,2);
-        H.at<double>(1,0) = 0;
-//        H.at<double>(1,1) = 1;
-//        H.at<double>(1,2) = 0;
-        H.at<double>(2,0) = 0;
-//        H.at<double>(2,1) = 0;
-//        H.at<double>(2,2) = 1;
+        // Use only components of H matrix which are related to the image translation
+        if (FEATURES_TYPE == "SIFT") {
+            H.at<double>(0,0) = 1;
+            H.at<double>(0,1) = 0;
+            H.at<double>(0,2) = - img2.cols - H.at<double>(0,2);
+            H.at<double>(1,0) = 0;
+//            H.at<double>(1,1) = 1;
+//            H.at<double>(1,2) = 0;
+            H.at<double>(2,0) = 0;
+//            H.at<double>(2,1) = 0;
+//            H.at<double>(2,2) = 1;
+        } else if (FEATURES_TYPE == "ORB") {
+            H.at<double>(0,0) = 1;
+            H.at<double>(0,1) = 0;
+            H.at<double>(0,2) = - img2.cols - H.at<double>(0,2);
+            H.at<double>(1,0) = 0;
+            H.at<double>(1,1) = 1;
+            H.at<double>(1,2) = 0;
+            H.at<double>(2,0) = 0;
+            H.at<double>(2,1) = 0;
+            H.at<double>(2,2) = 1;
+        }
 
         cv::Mat img2_result;
         cv::warpPerspective(img2, img2_result, H, cv::Size(2 * img2.cols, img2.rows));
@@ -285,10 +330,11 @@ void buildPanoramicImage(std::vector<cv::Mat>& listOfProjectedImages,
         cv::hconcat(img1, img2_result, img_stitch);
         img1 = img_stitch;
         imshow("img_stitch", img_stitch);
+
         cv::waitKey();
     }
 
-    // Crop the image to hide the y shift
+    // Crop the image to hide the black background
     int y_translation = std::abs(H.at<double>(1,2));
     cv::Range rowRange = cv::Range(y_translation,img_stitch.rows - y_translation);
     cv::Range colRange = cv::Range::all();
